@@ -1,24 +1,25 @@
 #include "pomodoro.h"
 
-PomodoroTimer::PomodoroTimer(RoboEyes<Adafruit_SSD1306>& e, DisplayManager& d) 
+PomodoroTimer::PomodoroTimer(RoboEyes<Adafruit_SSD1306>& e, Adafruit_SSD1306& d) 
   : eyes(e), display(d) {
   currentState = NORMAL_MODE;
-  previousState = NORMAL_MODE;
-  workDuration = 25;
-  breakDuration = 5;
   pomodoroCycles = 0;
-  running = false;
-  paused = false;
-  remainingTime = workDuration * 60;
+  isRunning = false;
+  remainingTime = 25 * 60;
   lastDisplayUpdate = 0;
-  lastEyeUpdate = 0;
+  exitConfirmRequested = false;
+  exitConfirmTime = 0;
 }
 
 void PomodoroTimer::update() {
-  if(!running || paused) return;
+  if(!isRunning) return;
   
   if(millis() >= timerEnd) {
-    timerComplete();
+    if(currentState == WORK_MODE) {
+      startBreak();
+    } else if(currentState == BREAK_MODE) {
+      stop();
+    }
     return;
   }
   
@@ -26,194 +27,179 @@ void PomodoroTimer::update() {
     updateDisplay();
     lastDisplayUpdate = millis();
   }
+}
+
+void PomodoroTimer::press() {
+  // Сбрасываем подтверждение выхода при любом нажатии A
+  exitConfirmRequested = false;
   
-  if(millis() - lastEyeUpdate >= 100) {
-    updateState();
-    lastEyeUpdate = millis();
-  }
-}
-
-void PomodoroTimer::start() {
   if(currentState == NORMAL_MODE) {
-    enterWorkMode();
-  } else if(currentState == COMPLETED_MODE) {
-    pomodoroCycles = 0;
-    enterWorkMode();
-  }
-}
-
-void PomodoroTimer::pause() {
-  if(running && !paused) {
-    running = false;
-    paused = true;
+    startWork();
+  } 
+  else if(currentState == WORK_MODE && isRunning) {
+    isRunning = false;
     remainingTime = (timerEnd - millis()) / 1000;
-    if(remainingTime < 0) remainingTime = 0;
-    eyes.setMood(TIRED);
-    display.showPauseMenu();
-  }
-}
-
-void PomodoroTimer::resume() {
-  if(!running && paused) {
+    showMessage("PAUSED", "Press A to continue", 1500);
+    updateDisplay();
+  } 
+  else if(currentState == WORK_MODE && !isRunning) {
     timerEnd = millis() + (remainingTime * 1000);
-    running = true;
-    paused = false;
-    if(currentState == WORK_MODE) eyes.setMood(ANGRY);
-    else eyes.setMood(HAPPY);
-    display.showMessage("Resumed!", "", 800);
+    isRunning = true;
+    showMessage("CONTINUE", "", 1000);
+    updateDisplay();
+  } 
+  else if(currentState == BREAK_MODE) {
+    stop();
   }
 }
 
-void PomodoroTimer::reset() {
-  running = false;
-  paused = false;
-  remainingTime = workDuration * 60;
-  enterNormalMode();
-}
-
-void PomodoroTimer::setWorkDuration(int minutes) {
-  workDuration = minutes;
+void PomodoroTimer::pressB() {
   if(currentState == NORMAL_MODE) {
-    remainingTime = workDuration * 60;
+    // В обычном режиме - смена эмоции
+    int r = random(4);
+    if(r == 0) eyes.setMood(ROBODEFAULT);
+    else if(r == 1) eyes.setMood(HAPPY);
+    else if(r == 2) eyes.setMood(ANGRY);
+    else eyes.setMood(TIRED);
+    eyes.blink();
+    showMessage("MOOD", "Changed!", 1000);
   }
-}
-
-void PomodoroTimer::setBreakDuration(int minutes) {
-  breakDuration = minutes;
+  else if((currentState == WORK_MODE || currentState == BREAK_MODE) && isRunning) {
+    // В режиме таймера - запрос подтверждения выхода
+    if(!exitConfirmRequested) {
+      exitConfirmRequested = true;
+      exitConfirmTime = millis();
+      showExitConfirm();
+    } else {
+      // Повторное нажатие - подтверждаем выход
+      exitConfirmRequested = false;
+      stop();
+      showMessage("EXIT", "Back to robot mode", 1500);
+      display.clearDisplay();
+      display.display();
+    }
+  }
+  else if((currentState == WORK_MODE || currentState == BREAK_MODE) && !isRunning) {
+    // На паузе - просто выходим без подтверждения
+    exitConfirmRequested = false;
+    stop();
+    showMessage("EXIT", "Back to robot mode", 1500);
+    display.clearDisplay();
+    display.display();
+  }
 }
 
 PomodoroState PomodoroTimer::getState() {
   return currentState;
 }
 
-bool PomodoroTimer::isRunning() {
-  return running;
-}
-
-bool PomodoroTimer::isPaused() {
-  return paused;
-}
-
-void PomodoroTimer::showStatus() {
-  char msg[30];
-  sprintf(msg, "Cycles: %d", pomodoroCycles);
-  display.showMessage("Pomodoro Status", msg, 1500);
-}
-
-void PomodoroTimer::enterNormalMode() {
-  currentState = NORMAL_MODE;
-  display.setMode(DISPLAY_EYES_ONLY);
-  
-  eyes.setMood(ROBODEFAULT);
-  eyes.setIdleMode(true, 3, 2);
-  eyes.setAutoblinker(true, 2, 3);
-  eyes.setSweat(false);
-  eyes.open();
-  
-  display.showNormalMode();
-}
-
-void PomodoroTimer::enterWorkMode() {
+void PomodoroTimer::startWork() {
   currentState = WORK_MODE;
-  running = true;
-  paused = false;
-  remainingTime = workDuration * 60;
+  isRunning = true;
+  remainingTime = 25 * 60;
   timerEnd = millis() + (remainingTime * 1000);
+  pomodoroCycles++;
+  exitConfirmRequested = false;
   
-  display.setMode(DISPLAY_TIMER_ONLY);
+  display.clearDisplay();
+  display.display();
   
-  eyes.setMood(ANGRY);
-  eyes.setIdleMode(false);
-  eyes.setAutoblinker(false);
-  eyes.setSweat(true);
-  
-  display.showWorkMode(workDuration);
+  showMessage("WORK", "25 minutes", 2000);
+  updateDisplay();
 }
 
-void PomodoroTimer::enterBreakMode() {
+void PomodoroTimer::startBreak() {
   currentState = BREAK_MODE;
-  running = true;
-  paused = false;
-  remainingTime = breakDuration * 60;
+  isRunning = true;
+  remainingTime = 5 * 60;
   timerEnd = millis() + (remainingTime * 1000);
+  exitConfirmRequested = false;
   
-  display.setMode(DISPLAY_TIMER_ONLY);
+  display.clearDisplay();
+  display.display();
   
-  eyes.setMood(HAPPY);
-  eyes.setIdleMode(true, 2, 1);
-  eyes.setAutoblinker(true, 1, 2);
-  eyes.setSweat(false);
+  showMessage("BREAK", "5 minutes", 2000);
+  updateDisplay();
   
-  display.showBreakMode(breakDuration);
-  
-  for(int i = 0; i < 3; i++) {
+  for(int i = 0; i < 2; i++) {
     eyes.blink();
     delay(200);
   }
 }
 
-void PomodoroTimer::enterCompletedMode() {
-  currentState = COMPLETED_MODE;
-  running = false;
-  paused = false;
-  celebrate();
-  timerEnd = millis() + 3000;
-}
-
-void PomodoroTimer::enterSettingsMode() {
-  currentState = SETTINGS_MODE;
-  running = false;
-  paused = false;
-  display.setMode(DISPLAY_SETTINGS_ONLY);
-}
-
-void PomodoroTimer::timerComplete() {
-  if(currentState == WORK_MODE) {
-    pomodoroCycles++;
-    enterBreakMode();
-  } else if(currentState == BREAK_MODE) {
-    enterCompletedMode();
-  }
+void PomodoroTimer::stop() {
+  currentState = NORMAL_MODE;
+  isRunning = false;
+  exitConfirmRequested = false;
+  
+  char msg[20];
+  sprintf(msg, "Cycles: %d", pomodoroCycles);
+  showMessage("COMPLETE!", msg, 2500);
+  
+  eyes.setMood(ROBODEFAULT);
+  eyes.setIdleMode(true, 3, 2);
+  eyes.setAutoblinker(true, 2, 3);
+  eyes.open();
+  
+  display.clearDisplay();
+  display.display();
 }
 
 void PomodoroTimer::updateDisplay() {
-  if(!running && !paused) return;
+  if(!isRunning) return;
   
-  if(display.getMode() == DISPLAY_TIMER_ONLY) {
-    int timeToShow = running ? (timerEnd - millis()) / 1000 : remainingTime;
-    if(timeToShow < 0) timeToShow = 0;
-    
-    int minutes = timeToShow / 60;
-    int seconds = timeToShow % 60;
-    const char* mode = (currentState == WORK_MODE) ? "WORK" : "BREAK";
-    
-    display.showTimer(minutes, seconds, paused, mode);
-    
-    int total = (currentState == WORK_MODE) ? workDuration * 60 : breakDuration * 60;
-    int elapsed = total - timeToShow;
-    display.showProgress(elapsed, total);
-  }
+  int timeToShow = (timerEnd - millis()) / 1000;
+  if(timeToShow < 0) timeToShow = 0;
+  
+  showTimer(timeToShow / 60, timeToShow % 60);
 }
 
-void PomodoroTimer::celebrate() {
-  eyes.setMood(HAPPY);
-  eyes.setCuriosity(false);
+void PomodoroTimer::showTimer(int minutes, int seconds) {
+  char timeStr[10];
+  sprintf(timeStr, "%02d:%02d", minutes, seconds);
   
-  for(int i = 0; i < 6; i++) {
-    eyes.anim_laugh();
-    delay(150);
-    eyes.blink();
-    delay(150);
-  }
+  display.clearDisplay();
+  display.setTextSize(3);
+  display.setTextColor(SSD1306_WHITE);
+  display.setCursor((128 - strlen(timeStr) * 18) / 2, 20);
+  display.print(timeStr);
   
-  display.showComplete(pomodoroCycles);
-  delay(2500);
+  int total = (currentState == WORK_MODE) ? 25 * 60 : 5 * 60;
+  int elapsed = total - (minutes * 60 + seconds);
+  int progress = map(elapsed, 0, total, 0, 124);
+  display.drawRect(2, 58, 124, 3, SSD1306_WHITE);
+  display.fillRect(3, 59, progress, 2, SSD1306_WHITE);
   
-  eyes.setCuriosity(true);
+  display.display();
 }
 
-void PomodoroTimer::updateState() {
-  if(previousState != currentState) {
-    previousState = currentState;
+void PomodoroTimer::showMessage(const char* line1, const char* line2, int duration) {
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setTextColor(SSD1306_WHITE);
+  display.setCursor((128 - strlen(line1) * 6) / 2, 25);
+  display.print(line1);
+  if(strlen(line2) > 0) {
+    display.setCursor((128 - strlen(line2) * 6) / 2, 40);
+    display.print(line2);
+  }
+  display.display();
+  delay(duration);
+}
+
+void PomodoroTimer::showExitConfirm() {
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setTextColor(SSD1306_WHITE);
+  display.setCursor(20, 25);
+  display.print("Exit Pomodoro?");
+  display.setCursor(15, 40);
+  display.print("B again to confirm");
+  display.display();
+  delay(2000);
+  
+
+  if(exitConfirmRequested && currentState != NORMAL_MODE) {
+    updateDisplay();
   }
 }

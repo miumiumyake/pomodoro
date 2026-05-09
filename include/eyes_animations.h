@@ -9,16 +9,32 @@ class EyeAnimator {
 private:
   RoboEyes<Adafruit_SSD1306>& eyes;
   unsigned long lastExpressionChange;
-  int currentExpression;
+  unsigned long lastBlinkTime;
+  bool randomModeActive;
+  
+ 
+  const int emotionsCount = 5;
+  int currentEmotion;
   
 public:
   EyeAnimator(RoboEyes<Adafruit_SSD1306>& e);
   
   void init();
   void update();
+  void setRandomMode(bool active);
+  void forceNextExpression();
+  void setSpecificExpression(int emotion);
+  
+ 
+  void setDefault();
+  void setHappy();
+  void setAngry();
+  void setTired();
+  void setCurious();
+  void setSurprised();  
+  
+private:
   void randomExpression();
-  void celebrate();
-  void blinkSequence(int count);
 };
 
 #endif

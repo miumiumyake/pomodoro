@@ -1,9 +1,10 @@
 #include "eyes_animations.h"
-#include "display.h"
 
 EyeAnimator::EyeAnimator(RoboEyes<Adafruit_SSD1306>& e) : eyes(e) {
   lastExpressionChange = 0;
-  currentExpression = 0;
+  lastBlinkTime = 0;
+  randomModeActive = true;
+  currentEmotion = ROBODEFAULT;
 }
 
 void EyeAnimator::init() {
@@ -11,55 +12,118 @@ void EyeAnimator::init() {
   eyes.setHeight(36, 36);
   eyes.setBorderradius(8, 8);
   eyes.setSpacebetween(10);
-  eyes.setIdleMode(true, 3, 2);
+  eyes.setIdleMode(true, 4, 2);
   eyes.setAutoblinker(true, 2, 3);
   eyes.setCuriosity(true);
   eyes.setPosition(ROBODEFAULT);
+  setDefault();
 }
 
 void EyeAnimator::update() {
+  if(!randomModeActive) return;
+  
   if(millis() - lastExpressionChange > 15000) {
     randomExpression();
     lastExpressionChange = millis();
   }
 }
 
+void EyeAnimator::setRandomMode(bool active) {
+  randomModeActive = active;
+  if(active) {
+    lastExpressionChange = millis();
+    randomExpression();
+  }
+}
+
+void EyeAnimator::forceNextExpression() {
+  randomExpression();
+  lastExpressionChange = millis();
+}
+
+void EyeAnimator::setSpecificExpression(int emotion) {
+  randomModeActive = false;
+  currentEmotion = emotion;
+  switch(emotion) {
+    case 0: setDefault(); break;
+    case 1: setHappy(); break;
+    case 2: setAngry(); break;
+    case 3: setTired(); break;
+    case 4: setCurious(); break;
+    case 5: setSurprised(); break;
+  }
+}
+
+void EyeAnimator::setDefault() {
+  eyes.setMood(ROBODEFAULT);
+  eyes.setCuriosity(false);
+  currentEmotion = ROBODEFAULT;
+}
+
+void EyeAnimator::setHappy() {
+  eyes.setMood(HAPPY);
+  eyes.setCuriosity(false);
+  currentEmotion = HAPPY;
+}
+
+void EyeAnimator::setAngry() {
+  eyes.setMood(ANGRY);
+  eyes.setCuriosity(false);
+  currentEmotion = ANGRY;
+}
+
+void EyeAnimator::setTired() {
+  eyes.setMood(TIRED);
+  eyes.setCuriosity(false);
+  currentEmotion = TIRED;
+}
+
+void EyeAnimator::setCurious() {
+  eyes.setMood(ROBODEFAULT);
+  eyes.setCuriosity(true);
+  currentEmotion = ROBODEFAULT;
+}
+
+void EyeAnimator::setSurprised() {
+  // Удивление - большие круглые глаза
+  eyes.setWidth(42, 42);
+  eyes.setHeight(42, 42);
+  eyes.setBorderradius(20, 20);
+  eyes.setMood(ROBODEFAULT);
+  delay(2000); 
+  eyes.setWidth(36, 36);
+  eyes.setHeight(36, 36);
+  eyes.setBorderradius(8, 8);
+}
+
 void EyeAnimator::randomExpression() {
-  int r = random(5);
+  int r = random(emotionsCount);
   
   switch(r) {
     case 0:
-      eyes.setMood(ROBODEFAULT);
+      setDefault();
+      Serial.println("Eyes: DEFAULT");
       break;
     case 1:
-      eyes.setMood(HAPPY);
-      delay(2000);
-      eyes.setMood(ROBODEFAULT);
+      setHappy();
+      Serial.println("Eyes: HAPPY");
       break;
     case 2:
-      eyes.anim_confused();
+      setAngry();
+      Serial.println("Eyes: ANGRY");
       break;
     case 3:
-      eyes.anim_laugh();
+      setTired();
+      Serial.println("Eyes: TIRED");
       break;
     case 4:
-      eyes.setMood(TIRED);
-      delay(2000);
-      eyes.setMood(ROBODEFAULT);
+      setCurious();
+      Serial.println("Eyes: CURIOUS");
       break;
   }
-}
-
-void EyeAnimator::celebrate() {
-  for(int i = 0; i < 5; i++) {
-    eyes.anim_laugh();
+  
+  if(random(3) == 0) {
     delay(100);
-  }
-}
-
-void EyeAnimator::blinkSequence(int count) {
-  for(int i = 0; i < count; i++) {
     eyes.blink();
-    delay(150);
   }
 }
